@@ -99,6 +99,7 @@
       <button type="button" id="pauseBtn">Pause</button>
       <button type="button" id="resetBtn" class="secondary">Reset</button>
       <button type="button" id="fullscreenBtn" class="fs-btn">Fullscreen</button>
+      <button type="button" id="soundTestBtn" class="secondary">Enable / Test Sounds</button>
     </div>
   </div>
 
@@ -226,10 +227,78 @@
       return { length, w1, w2 };
     }
 
+    async function enableAudioFromUserGesture() {
+      // iPad Safari may require audio playback to be initiated by a direct tap.
+      // Briefly start each embedded sound muted, then pause it so the session
+      // itself still begins silently. This does not guarantee audio if the
+      // device is muted or browser restrictions remain in place.
+      const sounds = [warn1, warn2, startEnd];
+      const results = await Promise.all(sounds.map(async (audio) => {
+        const wasMuted = audio.muted;
+        try {
+          audio.muted = true;
+          audio.currentTime = 0;
+          await audio.play();
+          audio.pause();
+          audio.currentTime = 0;
+          audio.muted = wasMuted;
+          return true;
+        } catch (_) {
+          audio.pause();
+          audio.currentTime = 0;
+          audio.muted = wasMuted;
+          return false;
+        }
+      }));
+
+      const allEnabled = results.every(Boolean);
+      status.textContent = allEnabled
+        ? "Sounds enabled. Start remains silent."
+        : "Sound could not be enabled. Check iPad volume, Silent Mode, and Safari settings.";
+      return allEnabled;
+    }
+
+    async function testSounds() {
+      const enabled = await enableAudioFromUserGesture();
+      if (!enabled) return;
+
+      // Play the two warnings and completion sound one at a time for a quick check.
+      const sounds = [
+        { audio: warn1, label: "Warning 1" },
+        { audio: warn2, label: "Warning 2" },
+        { audio: startEnd, label: "Completion" }
+      ];
+
+      for (const item of sounds) {
+        status.textContent = `Testing ${item.label} sound…`;
+        try {
+          item.audio.currentTime = 0;
+          await item.audio.play();
+          await new Promise(resolve => {
+            const finish = () => {
+              item.audio.removeEventListener("ended", finish);
+              resolve();
+            };
+            item.audio.addEventListener("ended", finish, { once: true });
+            // Safety timeout in case an audio file doesn't emit "ended".
+            setTimeout(finish, 5000);
+          });
+          item.audio.pause();
+          item.audio.currentTime = 0;
+        } catch (_) {
+          status.textContent = `${item.label} sound could not play. Check iPad audio settings.`;
+          return;
+        }
+      }
+      status.textContent = "Sound test finished.";
+    }
+
     function start() {
       const settings = validSettings();
       if (!settings) return;
 
+      // Prime audio from the user's tap, without playing an audible start sound.
+      enableAudioFromUserGesture();
       stopTicker();
       running = true;
       paused = false;
@@ -293,6 +362,7 @@
     document.getElementById("pauseBtn").addEventListener("click", pauseResume);
     document.getElementById("resetBtn").addEventListener("click", reset);
     document.getElementById("fullscreenBtn").addEventListener("click", enterFullscreen);
+    document.getElementById("soundTestBtn").addEventListener("click", testSounds);
 
     lengthInput.addEventListener("change", () => {
       if (!running && !paused && !completed) reset();
